@@ -50,6 +50,9 @@ parser.add_argument('--rotate', default=False, action='store_true',
 parser.add_argument('--nosmooth', default=False, action='store_true',
 					help='Prevent smoothing face detections over a short temporal window')
 
+parser.add_argument('--multiplier', type=int, default=1,
+					help='Speed multiplier to skip face detection frames to speedup the process')
+
 args = parser.parse_args()
 args.img_size = 96
 
@@ -65,7 +68,7 @@ def get_smoothened_boxes(boxes, T):
 		boxes[i] = np.mean(window, axis=0)
 	return boxes
 
-def face_detect(images):
+def face_detect(images, multiplier=1):
 	detector = face_detection.FaceAlignment(face_detection.LandmarksType._2D, 
 											flip_input=False, device=device)
 
@@ -74,8 +77,8 @@ def face_detect(images):
 	while 1:
 		predictions = []
 		try:
-			for i in tqdm(range(0, len(images), batch_size)):
-				predictions.extend(detector.get_detections_for_batch(np.array(images[i:i + batch_size])))
+			for i in tqdm(range(0, len(images), batch_size * multiplier)):
+				predictions.extend(detector.get_detections_for_batch(np.array(images[i:i + batch_size]), multiplier))
 		except RuntimeError:
 			if batch_size == 1: 
 				raise RuntimeError('Image too big to run face detection on GPU. Please use the --resize_factor argument')
@@ -105,14 +108,14 @@ def face_detect(images):
 	del detector
 	return results 
 
-def datagen(frames, mels):
+def datagen(frames, mels, multiplier):
 	img_batch, mel_batch, frame_batch, coords_batch = [], [], [], []
 
 	if args.box[0] == -1:
 		if not args.static:
-			face_det_results = face_detect(frames) # BGR2RGB for CNN face detection
+			face_det_results = face_detect(frames, multiplier) # BGR2RGB for CNN face detection
 		else:
-			face_det_results = face_detect([frames[0]])
+			face_det_results = face_detect([frames[0]], multiplier)
 	else:
 		print('Using the specified bounding box instead of face detection...')
 		y1, y2, x1, x2 = args.box
@@ -188,7 +191,15 @@ def main():
 
 	else:
 		video_stream = cv2.VideoCapture(args.face)
-		fps = video_stream.get(cv2.CAP_PROP_FPS)
+		if args.fps:
+			fps = args.fps
+		else:
+			fps = video_stream.get(cv2.CAP_PROP_FPS)
+		if args.multiplier:
+			multiplier = args.multiplier
+		else:
+			multiplier = 1
+		
 
 		print('Reading video frames...')
 
@@ -244,7 +255,7 @@ def main():
 	full_frames = full_frames[:len(mel_chunks)]
 
 	batch_size = args.wav2lip_batch_size
-	gen = datagen(full_frames.copy(), mel_chunks)
+	gen = datagen(full_frames.copy(), mel_chunks, multiplier)
 
 	for i, (img_batch, mel_batch, frames, coords) in enumerate(tqdm(gen, 
 											total=int(np.ceil(float(len(mel_chunks))/batch_size)))):

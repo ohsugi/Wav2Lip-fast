@@ -61,7 +61,7 @@ class FaceAlignment:
                                           globals(), locals(), [face_detector], 0)
         self.face_detector = face_detector_module.FaceDetector(device=device, verbose=verbose)
 
-    def get_detections_for_batch(self, images):
+    def get_detections_for_batch(self, images, multiplier=1):
         images = images[..., ::-1]
         detected_faces = self.face_detector.detect_from_batch(images.copy())
         results = []
@@ -74,6 +74,7 @@ class FaceAlignment:
             d = np.clip(d, 0, None)
             
             x1, y1, x2, y2 = map(int, d[:-1])
-            results.append((x1, y1, x2, y2))
+            for j in range(multiplier):
+                results.append((x1, y1, x2, y2))
 
         return results
