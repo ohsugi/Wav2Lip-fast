@@ -50,8 +50,11 @@ parser.add_argument('--rotate', default=False, action='store_true',
 parser.add_argument('--nosmooth', default=False, action='store_true',
 					help='Prevent smoothing face detections over a short temporal window')
 
+parser.add_argument('--cache', default=True,
+					help='Cache mode to store each video frame and corresponding face detection results to eliminate face detection process from the second attempt')
+
 parser.add_argument('--multiplier', type=int, default=1,
-					help='Speed multiplier to skip face detection frames to speedup the process')
+					help='Speed multiplier to skip face detection frames to speed up the process')
 
 args = parser.parse_args()
 args.img_size = 96
@@ -69,23 +72,41 @@ def get_smoothened_boxes(boxes, T):
 	return boxes
 
 def face_detect(images, multiplier=1):
-	detector = face_detection.FaceAlignment(face_detection.LandmarksType._2D, 
-											flip_input=False, device=device)
-
-	batch_size = args.face_det_batch_size
+	cache_file_name = os.path.splitext(args.face)[0] + ".txt"
+	predictions = []
+	if args.cache and os.path.isfile(cache_file_name):
+		file = open(cache_file_name, 'r')
+		for line in file:
+			(x1, y1, x2, y2) = line.split(', ')
+			predictions.append([int(x1), int(y1), int(x2), int(y2)])
+		file.close()
+		
+		if len(images) != len(predictions):
+			predictions = []
 	
-	while 1:
-		predictions = []
-		try:
-			for i in tqdm(range(0, len(images), batch_size * multiplier)):
-				predictions.extend(detector.get_detections_for_batch(np.array(images[i:i + batch_size]), multiplier))
-		except RuntimeError:
-			if batch_size == 1: 
-				raise RuntimeError('Image too big to run face detection on GPU. Please use the --resize_factor argument')
-			batch_size //= 2
-			print('Recovering from OOM error; New batch size: {}'.format(batch_size))
-			continue
-		break
+	if len(predictions) == 0:
+		detector = face_detection.FaceAlignment(face_detection.LandmarksType._2D, 
+												flip_input=False, device=device)
+		batch_size = args.face_det_batch_size
+		
+		while 1:
+			try:
+				for i in tqdm(range(0, len(images), batch_size * multiplier)):
+					predictions.extend(detector.get_detections_for_batch(np.array(images[i:i + batch_size]), multiplier))
+			except RuntimeError:
+				if batch_size == 1: 
+					raise RuntimeError('Image too big to run face detection on GPU. Please use the --resize_factor argument')
+				batch_size //= 2
+				print('Recovering from OOM error; New batch size: {}'.format(batch_size))
+				continue
+			break
+		del detector
+		
+		if args.cache:
+			file = open(cache_file_name, 'w')
+			for (x1, y1, x2, y2) in predictions:
+				file.write(str(x1) + ", " + str(y1) + ", " + str(x2) + ", " + str(y2) + "\n")
+			file.close()
 
 	results = []
 	pady1, pady2, padx1, padx2 = args.pads
@@ -105,7 +126,6 @@ def face_detect(images, multiplier=1):
 	if not args.nosmooth: boxes = get_smoothened_boxes(boxes, T=5)
 	results = [[image[y1: y2, x1:x2], (y1, y2, x1, x2)] for image, (x1, y1, x2, y2) in zip(images, boxes)]
 
-	del detector
 	return results 
 
 def datagen(frames, mels, multiplier):
