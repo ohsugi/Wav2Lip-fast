@@ -51,7 +51,7 @@ parser.add_argument('--nosmooth', default=False, action='store_true',
 					help='Prevent smoothing face detections over a short temporal window')
 
 parser.add_argument('--cache', default=True,
-					help='Cache mode to store each video frame and corresponding face detection results to eliminate face detection process from the second attempt')
+					help='Activate cache to store face detection results to eliminate face detection process from the second attempt for the same video')
 
 parser.add_argument('--multiplier', type=int, default=1,
 					help='Speed multiplier to skip face detection frames to speed up the process')
